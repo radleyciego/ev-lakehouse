@@ -1,4 +1,20 @@
+# Conda/Python
 env/
-__pycache__/
 *.pyc
-*data/raw
+__pycache__/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data
+data/raw/
+data/interim/
+data/external/
+
+# Docker
+*.log
+*.env
+
+# OS
+.DS_Store
