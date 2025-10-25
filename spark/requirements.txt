@@ -1,0 +1,11 @@
+pyspark==3.5.0
+delta-spark==3.2.0
+apache-sedona==1.5.1
+boto3
+geopandas
+shapely
+pyarrow
+fiona
+rioxarray
+requests
+tqdm
