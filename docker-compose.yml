@@ -1,49 +1,71 @@
 version: "3.9"
+
 services:
+  # MinIO: object storage
   minio:
-    image: quay.io/minio/minio
+    image: quay.io/minio/minio:latest
     container_name: minio
     ports:
       - "9000:9000"
-      - "9090:9090"
+      - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9090"
+    command: server /data --console-address ":9001"
     volumes:
       - ./minio/data:/data
 
+  # Spark (driver & worker)
   spark:
     build: ./spark
     container_name: spark
-    ports:
-      - "8888:8888"
-      - "4040:4040"
     environment:
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      AWS_REGION: us-east-1
-      S3_ENDPOINT: http://minio:9000
-      PYSPARK_PYTHON: python3
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    depends_on:
+      - minio
     volumes:
-      - ./notebooks:/opt/workspace/notebooks
-    command: >
-      bash -c "
-      start.sh jupyter notebook
-        --ip=0.0.0.0
-        --port=8888
-        --allow-root
-        --NotebookApp.token=''
-        --NotebookApp.password=''
-      "
+      - ./spark:/workspace
+      - ./sumo/data:/data
 
-  postgis:
-    image: postgis/postgis:15-3.3-alpine
-    platform: linux/amd64
-    container_name: postgis
+  # 🚦 SUMO (traffic simulation)
+  sumo:
+    build: ./sumo
+    container_name: sumo
+    depends_on:
+      - minio
+    volumes:
+      - ./sumo/data:/workspace/data
+    command: bash -c "sumo -c /workspace/data/evacuation.sumocfg && cp /workspace/data/edge_data.xml /data/"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: evlake
+      - MINIO_ENDPOINT=http://minio:9000
+    working_dir: /workspace
+
+  # RouteE (energy modeling)
+  routee:
+    build: ./routee
+    container_name: routee
+    depends_on:
+      - sumo
+    volumes:
+      - ./sumo/data:/data
+      - ./routee:/workspace
+    command: python routee_pipeline.py /data/edge_data.xml /data/energy_results.csv
+
+  # Airflow (optional orchestrator)
+  airflow:
+    image: apache/airflow:2.10.1-python3.10
+    container_name: airflow
+    depends_on:
+      - spark
+      - routee
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./sumo/data:/data
     ports:
-    - "5433:5432"
+      - "8080:8080"
+    command: webserver
